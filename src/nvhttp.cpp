@@ -305,6 +305,32 @@ namespace nvhttp {
     return launch_session;
   }
 
+  void print_byte_array(std::string str, const uint8_t* array, size_t len) {
+      BOOST_LOG(debug) << str << " string start.";
+      BOOST_LOG(debug) << std::string((const char*)array, len);
+
+      BOOST_LOG(debug) << str << " string end.";
+
+      BOOST_LOG(debug) << str << "[] start.";
+      {
+          std::string message;
+          message.append("{");
+          for (int i = 0; i < len; i++) {
+              std::ostringstream ss;
+              ss << std::hex << int(array[i]);
+              message.append("0x");
+              message.append(ss.str());
+              if (i == len - 1) {
+              } else {
+                  message.append(", ");
+              }
+          }
+          message.append("}");
+          BOOST_LOG(debug) << message;
+      }
+      BOOST_LOG(debug) << str << "[] end.";
+  }
+
   void
   getservercert(pair_session_t &sess, pt::ptree &tree, const std::string &pin) {
     if (sess.async_insert_pin.salt.size() < 32) {
@@ -315,6 +341,8 @@ namespace nvhttp {
     }
 
     std::string_view salt_view { sess.async_insert_pin.salt.data(), 32 };
+    print_byte_array("salt_view", (const uint8_t*)salt_view.data(), salt_view.size());
+    print_byte_array("pin", (const uint8_t*)pin.data(), pin.size());
 
     auto salt = util::from_hex<std::array<uint8_t, 16>>(salt_view, true);
 
@@ -326,14 +354,21 @@ namespace nvhttp {
     tree.put("root.<xmlattr>.status_code", 200);
   }
 
+
+
   void
   serverchallengeresp(pair_session_t &sess, pt::ptree &tree, const args_t &args) {
     auto encrypted_response = util::from_hex_vec(get_arg(args, "serverchallengeresp"), true);
+    std::string serverchallengeresp = get_arg(args, "serverchallengeresp");
+    print_byte_array("serverchallengeresp", (const uint8_t *)serverchallengeresp.c_str(), serverchallengeresp.size());
+
+    print_byte_array("encrypted_response", (const uint8_t *)encrypted_response.c_str(), encrypted_response.size());
 
     std::vector<uint8_t> decrypted;
     crypto::cipher::ecb_t cipher(*sess.cipher_key, false);
 
     cipher.decrypt(encrypted_response, decrypted);
+    print_byte_array("decrypted", (const uint8_t*)decrypted.data(), decrypted.size());
 
     sess.clienthash = std::move(decrypted);
 
@@ -371,12 +406,15 @@ namespace nvhttp {
 
     plaintext.insert(std::end(plaintext), std::begin(hash), std::end(hash));
     plaintext.insert(std::end(plaintext), std::begin(serverchallenge), std::end(serverchallenge));
+    print_byte_array("plaintext", (const uint8_t*)plaintext.data(), plaintext.size());
 
     std::vector<uint8_t> encrypted;
     cipher.encrypt(plaintext, encrypted);
 
     sess.serversecret = std::move(serversecret);
     sess.serverchallenge = std::move(serverchallenge);
+    print_byte_array("sess.serverchallenge", (const uint8_t*)sess.serverchallenge.data(), sess.serverchallenge.size());
+    print_byte_array("sess.serversecret", (const uint8_t*)sess.serversecret.data(), sess.serversecret.size());
 
     tree.put("root.paired", 1);
     tree.put("root.challengeresponse", util::hex_vec(encrypted, true));
@@ -411,6 +449,14 @@ namespace nvhttp {
     auto hash = crypto::hash(data);
 
     // if hash not correct, probably MITM
+    BOOST_LOG(debug) << "std::memcmp(hash.data(), sess.clienthash.data(), hash.size()): " << bool(std::memcmp(hash.data(), sess.clienthash.data(), hash.size()));
+    print_byte_array("hash.data()", hash.data(), hash.size());
+    print_byte_array("sess.clienthash.data()", sess.clienthash.data(), hash.size());
+    BOOST_LOG(debug) << "crypto::verify256(crypto::x509(client.cert), secret, sign): " << bool(crypto::verify256(crypto::x509(client.cert), secret, sign));
+    BOOST_LOG(debug) << "client.cert: " << client.cert;
+    print_byte_array("secret: ", (const uint8_t*)secret.data(), secret.size());
+    print_byte_array("sign: ", (const uint8_t*)sign.data(), sign.size());
+
     if (!std::memcmp(hash.data(), sess.clienthash.data(), hash.size()) && crypto::verify256(crypto::x509(client.cert), secret, sign)) {
       tree.put("root.paired", 1);
       add_cert->raise(crypto::x509(client.cert));

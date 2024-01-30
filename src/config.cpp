@@ -1125,6 +1125,9 @@ namespace config {
       }
     }
 
+    sunshine.min_log_level = 0;
+
+
     auto it = vars.find("flags"s);
     if (it != std::end(vars)) {
       apply_flags(it->second.c_str());
