@@ -668,16 +668,21 @@ namespace nvhttp {
     print_req<T>(request);
 
     int pair_status = 0;
+  #ifdef HAVE_QT_SSL_FOR_WASM
     if constexpr (std::is_same_v<SimpleWeb::HTTPS, T>) {
+  #endif
       auto args = request->parse_query_string();
       auto clientID = args.find("uniqueid"s);
 
       if (clientID != std::end(args)) {
         if (auto it = map_id_client.find(clientID->second); it != std::end(map_id_client)) {
+          BOOST_LOG(debug) << "Update paired state for client: " << clientID->first << " , " << clientID->second;
           pair_status = 1;
         }
       }
+  #ifdef HAVE_QT_SSL_FOR_WASM
     }
+  #endif
 
     auto local_endpoint = request->local_endpoint();
 
@@ -762,9 +767,11 @@ namespace nvhttp {
     response->close_connection_after_response = true;
   }
 
+
+  template <class T>
   void
-  applist(resp_https_t response, req_https_t request) {
-    print_req<SimpleWeb::HTTPS>(request);
+  applist(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
+    print_req<T>(request);
 
     pt::ptree tree;
 
@@ -782,7 +789,7 @@ namespace nvhttp {
 
     for (auto &proc : proc::proc.get_apps()) {
       pt::ptree app;
-
+      BOOST_LOG(debug) << "APP: " << proc.name;
       app.put("IsHdrSupported"s, video::active_hevc_mode == 3 ? 1 : 0);
       app.put("AppTitle"s, proc.name);
       app.put("ID", proc.id);
@@ -791,9 +798,10 @@ namespace nvhttp {
     }
   }
 
+  template <class T>
   void
-  launch(bool &host_audio, resp_https_t response, req_https_t request) {
-    print_req<SimpleWeb::HTTPS>(request);
+  launch(bool &host_audio, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
+    print_req<T>(request);
 
     pt::ptree tree;
     auto g = util::fail_guard([&]() {
@@ -871,9 +879,10 @@ namespace nvhttp {
     tree.put("root.gamesession", 1);
   }
 
+  template <class T>
   void
-  resume(bool &host_audio, resp_https_t response, req_https_t request) {
-    print_req<SimpleWeb::HTTPS>(request);
+  resume(bool &host_audio, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
+    print_req<T>(request);
 
     pt::ptree tree;
     auto g = util::fail_guard([&]() {
@@ -942,9 +951,10 @@ namespace nvhttp {
     tree.put("root.resume", 1);
   }
 
+  template <class T>
   void
-  cancel(resp_https_t response, req_https_t request) {
-    print_req<SimpleWeb::HTTPS>(request);
+  cancel(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
+    print_req<T>(request);
 
     pt::ptree tree;
     auto g = util::fail_guard([&]() {
@@ -973,9 +983,10 @@ namespace nvhttp {
     }
   }
 
+  template <class T>
   void
-  appasset(resp_https_t response, req_https_t request) {
-    print_req<SimpleWeb::HTTPS>(request);
+  appasset(std::shared_ptr<typename SimpleWeb::ServerBase<T>::Response> response, std::shared_ptr<typename SimpleWeb::ServerBase<T>::Request> request) {
+    print_req<T>(request);
 
     auto args = request->parse_query_string();
     auto app_image = proc::proc.get_app_image(util::from_view(get_arg(args, "appid")));
@@ -1086,11 +1097,11 @@ namespace nvhttp {
     https_server.default_resource["GET"] = not_found<SimpleWeb::HTTPS>;
     https_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTPS>;
     https_server.resource["^/pair$"]["GET"] = [&add_cert](auto resp, auto req) { pair<SimpleWeb::HTTPS>(add_cert, resp, req); };
-    https_server.resource["^/applist$"]["GET"] = applist;
-    https_server.resource["^/appasset$"]["GET"] = appasset;
-    https_server.resource["^/launch$"]["GET"] = [&host_audio](auto resp, auto req) { launch(host_audio, resp, req); };
-    https_server.resource["^/resume$"]["GET"] = [&host_audio](auto resp, auto req) { resume(host_audio, resp, req); };
-    https_server.resource["^/cancel$"]["GET"] = cancel;
+    https_server.resource["^/applist$"]["GET"] = applist<SimpleWeb::HTTPS>;
+    https_server.resource["^/appasset$"]["GET"] = appasset<SimpleWeb::HTTPS>;
+    https_server.resource["^/launch$"]["GET"] = [&host_audio](auto resp, auto req) { launch<SimpleWeb::HTTPS>(host_audio, resp, req); };
+    https_server.resource["^/resume$"]["GET"] = [&host_audio](auto resp, auto req) { resume<SimpleWeb::HTTPS>(host_audio, resp, req); };
+    https_server.resource["^/cancel$"]["GET"] = cancel<SimpleWeb::HTTPS>;
 
     https_server.config.reuse_address = true;
     https_server.config.address = net::af_to_any_address_string(address_family);
@@ -1099,6 +1110,14 @@ namespace nvhttp {
     http_server.default_resource["GET"] = not_found<SimpleWeb::HTTP>;
     http_server.resource["^/serverinfo$"]["GET"] = serverinfo<SimpleWeb::HTTP>;
     http_server.resource["^/pair$"]["GET"] = [&add_cert](auto resp, auto req) { pair<SimpleWeb::HTTP>(add_cert, resp, req); };
+
+#ifndef HAVE_QT_SSL_FOR_WASM
+    http_server.resource["^/applist$"]["GET"] = applist<SimpleWeb::HTTP>;
+    http_server.resource["^/appasset$"]["GET"] = appasset<SimpleWeb::HTTP>;
+    http_server.resource["^/launch$"]["GET"] = [&host_audio](auto resp, auto req) { launch<SimpleWeb::HTTP>(host_audio, resp, req); };
+    http_server.resource["^/resume$"]["GET"] = [&host_audio](auto resp, auto req) { resume<SimpleWeb::HTTP>(host_audio, resp, req); };
+    http_server.resource["^/cancel$"]["GET"] = cancel<SimpleWeb::HTTP>;
+#endif
 
     http_server.config.reuse_address = true;
     http_server.config.address = net::af_to_any_address_string(address_family);
